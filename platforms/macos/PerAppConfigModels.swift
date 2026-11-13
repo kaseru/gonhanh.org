@@ -39,7 +39,7 @@ enum DelayPreset: Int, CaseIterable {
     /// Delay tuple: (backspace µs, wait µs, text µs) — matches detectMethod() values
     var delays: (UInt32, UInt32, UInt32) {
         switch self {
-        case .none: (200, 800, 500) // fast default
+        case .none: (0, 0, 0) // fast default (proxy injection, no wait)
         case .low: (1000, 3000, 1500)
         case .medium: (3000, 8000, 3000) // slow/Electron
         case .high: (8000, 25000, 8000)

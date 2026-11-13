@@ -254,8 +254,7 @@ struct KeyboardShortcut: Codable, Equatable {
     /// - Returns: true if exact match (same key + exact same modifiers, no extras)
     func matches(keyCode pressedKeyCode: UInt16, flags: CGEventFlags) -> Bool {
         // For key+modifier shortcuts: check keyCode and exact modifier match
-        guard !isModifierOnly else { return false }
-        guard pressedKeyCode == keyCode else { return false }
+        guard !isModifierOnly, pressedKeyCode == keyCode else { return false }
         let savedFlags = CGEventFlags(rawValue: modifiers)
         // Exact match: only the saved modifiers should be pressed, no extras
         return flags.intersection(Self.modifierMask) == savedFlags.intersection(Self.modifierMask)

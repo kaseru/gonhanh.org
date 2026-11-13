@@ -21,6 +21,7 @@ DerivedData/
 platforms/macos/*.a
 platforms/macos/*.dylib
 platforms/macos/build/
+platforms/macos/Build/
 *.xcworkspace/
 project.xcworkspace/
 

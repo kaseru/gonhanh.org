@@ -279,10 +279,8 @@ extension UpdateManager: URLSessionDownloadDelegate {
     }
 
     func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error, (error as NSError).code != NSURLErrorCancelled {
-            if case .downloading = state {
-                state = .error("Tải về thất bại")
-            }
+        if let error, (error as NSError).code != NSURLErrorCancelled, case .downloading = state {
+            state = .error("Tải về thất bại")
         }
     }
 }

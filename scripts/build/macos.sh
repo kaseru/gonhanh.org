@@ -185,8 +185,7 @@ if [ -d "GoNhanh.xcodeproj" ]; then
         echo "Building with Developer ID signing..."
         xcodebuild -scheme GoNhanh \
             -configuration Release \
-            -destination 'platform=macOS,arch=arm64' \
-            -destination 'platform=macOS,arch=x86_64' \
+            -destination 'generic/platform=macOS' \
             -derivedDataPath "$(pwd)/build/DerivedData" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$VERSION" \
@@ -199,8 +198,7 @@ if [ -d "GoNhanh.xcodeproj" ]; then
         echo "Building with ad-hoc signing (development)..."
         xcodebuild -scheme GoNhanh \
             -configuration Release \
-            -destination 'platform=macOS,arch=arm64' \
-            -destination 'platform=macOS,arch=x86_64' \
+            -destination 'generic/platform=macOS' \
             -derivedDataPath "$(pwd)/build/DerivedData" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$VERSION" \

@@ -125,13 +125,12 @@ class SpecialPanelAppDetector {
                 }
 
                 // Spotlight and Raycast typically use high window layers (above normal windows)
-                if windowLayer > 0 {
-                    if let app = NSRunningApplication(processIdentifier: ownerPID),
-                       let bundleId = app.bundleIdentifier,
-                       isSpecialPanelApp(bundleId)
-                    {
-                        return bundleId
-                    }
+                if windowLayer > 0,
+                   let app = NSRunningApplication(processIdentifier: ownerPID),
+                   let bundleId = app.bundleIdentifier,
+                   isSpecialPanelApp(bundleId)
+                {
+                    return bundleId
                 }
             }
         }

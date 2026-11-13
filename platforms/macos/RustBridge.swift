@@ -182,7 +182,7 @@ private func isBreakKey(_ keyCode: CGKeyCode, shift: Bool) -> Bool {
 
 private enum InjectionMethod {
     case fast // Default: backspace + text
-    case slow // Terminals/Electron: backspace + text (same as fast unless a delay is set by hand)
+    case slow // Terminals/Electron: backspace + text with delays
     case charByChar // Safari Google Docs: backspace + text character-by-character
     case selection // Browser address bars: Shift+Left select + type replacement
     case axDirect // Spotlight primary: AX API direct text manipulation (macOS 13+)
@@ -215,7 +215,7 @@ private class TextInjector {
     /// Every event is posted with CGEventTapPostEvent (proxy), i.e. at the tap's own position in the
     /// event stream. Posting at the end of the session queue (CGEvent.post) let the next physical key
     /// overtake the replacement (việt -> vitệ), so there is nothing to wait for after posting.
-    /// `delays` is zero unless the user set a delay for the app by hand.
+    /// `delays` only gives slow apps time to process events; zero for plain apps.
     func injectSync(bs: Int, text: String, method: InjectionMethod, delays: (UInt32, UInt32, UInt32), proxy: CGEventTapProxy) {
         semaphore.wait()
         defer { semaphore.signal() }
@@ -243,7 +243,9 @@ private class TextInjector {
 
     /// Sleep only when a delay was asked for (zero means post straight away)
     private func pause(_ micros: UInt32) {
-        if micros > 0 { usleep(micros) }
+        if micros > 0 {
+            usleep(micros)
+        }
     }
 
     /// Standard backspace injection: delete N chars, then type replacement
@@ -261,7 +263,7 @@ private class TextInjector {
         // Empty char prefix: send U+202F to break autocomplete highlight, then +1 backspace
         if emptyCharPrefix {
             postText("\u{202F}", source: src, proxy: proxy)
-            pause(delays.0)
+            usleep(delays.0 > 0 ? delays.0 : 1000) // let the autocomplete highlight break
             bs += 1 // +1 to also delete the empty char
         }
 
@@ -299,6 +301,11 @@ private class TextInjector {
     private func injectViaSelection(bs: Int, text: String, delays: (UInt32, UInt32, UInt32), proxy: CGEventTapProxy) {
         guard let src = CGEventSource(stateID: .privateState) else { return }
 
+        // Address bars apply the selection asynchronously: keep a minimum wait even with no delay set
+        let selDelay = delays.0 > 0 ? delays.0 : 1000
+        let waitDelay = delays.1 > 0 ? delays.1 : 3000
+        let textDelay = delays.2 > 0 ? delays.2 : 2000
+
         if bs > 0 {
             // If text is empty (backspace-only, no replacement), use backspace to properly delete spaces/punctuation
             // This fixes issue where Shift+Left selects space instead of deleting it
@@ -306,19 +313,19 @@ private class TextInjector {
                 // Backspace-only: use backspace for all deletions
                 for _ in 0 ..< bs {
                     postKey(KeyCode.backspace, source: src, proxy: proxy)
-                    pause(delays.0)
+                    usleep(selDelay)
                 }
             } else {
                 // Text replacement: use Shift+Left to select (normal selection method)
                 for _ in 0 ..< bs {
                     postKey(KeyCode.leftArrow, source: src, flags: .maskShift, proxy: proxy)
-                    pause(delays.0)
+                    usleep(selDelay)
                 }
             }
-            pause(delays.1)
+            usleep(waitDelay)
         }
 
-        postText(text, source: src, delay: delays.2, proxy: proxy)
+        postText(text, source: src, delay: textDelay, proxy: proxy)
     }
 
     /// Autocomplete injection: Forward Delete to clear suggestion, then backspace + text via proxy
@@ -1865,10 +1872,8 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
 
         // Get owning app's bundle ID (works for Spotlight overlay)
         var pid: pid_t = 0
-        if AXUIElementGetPid(axEl, &pid) == .success {
-            if let app = NSRunningApplication(processIdentifier: pid) {
-                bundleId = app.bundleIdentifier
-            }
+        if AXUIElementGetPid(axEl, &pid) == .success, let app = NSRunningApplication(processIdentifier: pid) {
+            bundleId = app.bundleIdentifier
         }
     }
     if Log.isEnabled {
@@ -1885,22 +1890,18 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
 
     guard let bundleId else { return (.fast, (0, 0, 0)) }
 
-    /// Helper to cache and return result (only logs when method+app changes)
-    /// Replacements go out through the event tap proxy (in order, no waiting), so the delays in the
-    /// table below are not applied: the base delays are zero. Only a delay set by hand for the app
-    /// (per-app profile) is honored.
-    func cached(_ m: InjectionMethod, _ tableDelays: (UInt32, UInt32, UInt32), _ methodName: String) -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
-        let d: (UInt32, UInt32, UInt32) = (0, 0, 0)
-        // Store base detection result (before overrides) for UI hint; zero delays, so a profile
-        // pre-filled from it starts at "none" like what is actually applied
+    // Helper to cache and return result (only logs when method+app changes)
+    // Replacements go out through the event tap proxy, so ordering no longer depends on delays.
+    // The delays below are only for apps that need time to process events (autocomplete, selection,
+    // Monaco/Electron); plain apps use zero.
+    func cached(_ m: InjectionMethod, _ d: (UInt32, UInt32, UInt32), _ methodName: String) -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
+        // Store base detection result (before overrides) for UI hint
         DetectionCache.setDetectedDefault(for: bundleId, value: (method: "\(m)", delays: d))
 
         // Apply per-app profile overrides from snapshot (set on app switch, thread-safe)
         if let profile = DetectionCache.activeProfile {
             var finalMethod = m
-            // Preset .none must stay zero (DelayPreset.none.delays is the old 200/800/500 default)
-            let preset = DelayPreset(rawValue: profile.delayPreset) ?? .none
-            let finalDelays = preset == .none ? d : preset.delays
+            let finalDelays = DelayPreset(rawValue: profile.delayPreset)?.delays ?? d
 
             // Injection method override
             if profile.injectionOverride >= 0, let inject = InjectionOverride(rawValue: profile.injectionOverride) {
@@ -2005,7 +2006,7 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
         "com.openai.atlas", // ChatGPT Atlas
     ]
     // All browser contexts use emptyCharPrefix to break autocomplete/suggestion highlights
-    // (table delays are not applied, see cached())
+    // Medium delays (3ms/8ms/3ms) to handle web apps with popup interception (e.g. Telegram Web)
     if browsers.contains(bundleId) {
         return cached(.emptyCharPrefix, (3000, 8000, 3000), "emptyChar:browser")
     }
@@ -2079,8 +2080,8 @@ private func detectMethod() -> (InjectionMethod, (UInt32, UInt32, UInt32)) {
         return cached(.syncProxy, (0, 0, 0), "sync:game")
     }
 
-    // Default
-    return cached(.fast, (1000, 3000, 1500), "default")
+    // Default: no delays (proxy injection keeps events in order)
+    return cached(.fast, (0, 0, 0), "default")
 }
 
 private func sendReplacement(backspace bs: Int, chars: [Character], method: InjectionMethod, delays: (UInt32, UInt32, UInt32), proxy: CGEventTapProxy) {
