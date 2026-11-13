@@ -342,6 +342,10 @@ pub struct Engine {
     /// Buffer was just restored from DELETE - clear on next letter input
     /// This prevents typing after restore from appending to old buffer
     restored_pending_clear: bool,
+    /// Buffer holds a word brought back from the screen (backspace into a committed
+    /// word, or restore_word from the app). That word was already accepted as typed,
+    /// so English auto-restore must never rewrite it to raw keystrokes.
+    buf_from_restore: bool,
     /// Restored word was pure ASCII (no Vietnamese chars) - clear on ANY letter
     /// For Vietnamese restored words, only clear on consonant (allow mark/tone edits)
     restored_is_ascii: bool,
@@ -400,6 +404,7 @@ impl Engine {
             telex_double_raw_len: 0,
             shortcut_prefix: String::new(),
             restored_pending_clear: false,
+            buf_from_restore: false,
             restored_is_ascii: false,
             auto_capitalize: false, // Default: OFF
             pending_capitalize: false,
@@ -990,6 +995,7 @@ impl Engine {
                         // Mark that buffer was restored - if user types new letter,
                         // clear buffer first (they want fresh word, not append)
                         self.restored_pending_clear = true;
+                        self.buf_from_restore = true;
                     }
                 }
                 // Delete one space
@@ -4582,6 +4588,7 @@ impl Engine {
         self.telex_double_raw_len = 0;
         self.restored_pending_clear = false;
         self.restored_is_ascii = false;
+        self.buf_from_restore = false;
         self.shortcut_prefix.clear();
     }
 
@@ -4741,6 +4748,7 @@ impl Engine {
         // But mark/tone keys like 's' will still work to modify the restored word
         if !self.buf.is_empty() {
             self.restored_pending_clear = true;
+            self.buf_from_restore = true;
             self.restored_is_ascii = is_ascii;
             // Rebuild last_transform so a repeated modifier key toggles the
             // diacritic off, matching pre-commit editing behavior.
@@ -4760,6 +4768,13 @@ impl Engine {
         }
 
         if self.raw_input.is_empty() || self.buf.is_empty() {
+            return None;
+        }
+
+        // Never auto-restore a word that was brought back from the screen for editing.
+        // Example: "nghiệm " → Backspace×2 → "nghiệ" → type "uoiwf" + Space
+        // used to become "nghieuoiwf " (the already-typed "nghiệ" was destroyed).
+        if self.buf_from_restore {
             return None;
         }
 
